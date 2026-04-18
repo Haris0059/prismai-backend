@@ -1,0 +1,184 @@
+{
+  "info": {
+    "name": "PrismAI Backend",
+    "description": "All endpoints for the PrismAI proxy. The chat requests auto-save the returned conversation_id into a collection variable so subsequent requests reuse it.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8888" },
+    { "key": "conversation_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Chat — start new (OpenAI)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/chat/openai", "host": ["{{baseUrl}}"], "path": ["chat", "openai"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"gpt-4o-mini\",\n  \"message\": \"Hello, reply with the single word: pong\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('returns conversation_id', () => pm.expect(json.conversation_id).to.be.a('string'));",
+              "pm.collectionVariables.set('conversation_id', json.conversation_id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat — start new (Anthropic)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/chat/anthropic", "host": ["{{baseUrl}}"], "path": ["chat", "anthropic"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"message\": \"Hello, reply with the single word: pong\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('conversation_id', json.conversation_id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat — follow-up (replays history)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/chat/openai", "host": ["{{baseUrl}}"], "path": ["chat", "openai"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"model\": \"gpt-4o-mini\",\n  \"message\": \"What word did I just ask you to reply with?\",\n  \"conversation_id\": \"{{conversation_id}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('same conversation_id echoed back', () => {",
+              "  pm.expect(pm.response.json().conversation_id).to.eql(pm.collectionVariables.get('conversation_id'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List conversations",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{baseUrl}}/conversations", "host": ["{{baseUrl}}"], "path": ["conversations"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('returns array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get conversation by id",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/conversations/{{conversation_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["conversations", "{{conversation_id}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('has messages array', () => pm.expect(json.messages).to.be.an('array'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rename conversation",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/conversations/{{conversation_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["conversations", "{{conversation_id}}"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Renamed from Postman\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('title updated', () => pm.expect(pm.response.json().title).to.eql('Renamed from Postman'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delete conversation",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/conversations/{{conversation_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["conversations", "{{conversation_id}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('deleted: true', () => pm.expect(pm.response.json().deleted).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

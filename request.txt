@@ -1,0 +1,3 @@
+POST https://your-vps-ip.com/chat/anthropic
+Header: Authorization: Bearer <firebase_id_token>
+Body: { "model": "claude-sonnet-4-20250514", "messages": [{"role": "user", "content": "Hello"}] }
