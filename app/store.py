@@ -4,7 +4,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db import Conversation, Message
+from app.db.models import Conversation, Message
 
 
 async def create_conversation(session: AsyncSession, *, user_id: str, provider: str, model: str) -> Conversation:
