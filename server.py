@@ -1,41 +1,33 @@
 import asyncio
-import os
 import uuid
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Header
 from pydantic import BaseModel
 
-load_dotenv()
+from sqlalchemy import func
 
-from sqlalchemy import func  # noqa: E402
-
-from db import Conversation, async_session  # noqa: E402
-import store  # noqa: E402
+from app.db.models import Conversation
+from app.db.session import async_session
+from app.core.settings import settings
+from app.core.auth import get_current_user
+import app.core.logging  # Setup structlog
+import app.store as store
 
 app = FastAPI()
-
-
-# TODO: Firebase auth — re-enable once service account is provisioned
-async def verify_firebase_token(authorization: str | None = Header(default=None)) -> dict:
-    return {"uid": "dev-user"}
-
 
 class ChatRequest(BaseModel):
     model: str
     message: str
     conversation_id: uuid.UUID | None = None
 
-
 class TitleUpdate(BaseModel):
     title: str
-
 
 PROVIDERS = {
     "anthropic": {
         "url": "https://api.anthropic.com/v1/messages",
-        "key": os.getenv("ANTHROPIC_API_KEY"),
+        "key": settings.anthropic_api_key,
         "headers": lambda key: {
             "x-api-key": key,
             "anthropic-version": "2023-06-01",
@@ -50,7 +42,7 @@ PROVIDERS = {
     },
     "openai": {
         "url": "https://api.openai.com/v1/chat/completions",
-        "key": os.getenv("OPENAI_API_KEY"),
+        "key": settings.openai_api_key,
         "headers": lambda key: {
             "Authorization": f"Bearer {key}",
             "content-type": "application/json",
@@ -62,7 +54,6 @@ PROVIDERS = {
         "extract_text": lambda data: data["choices"][0]["message"]["content"],
     },
 }
-
 
 async def _call_provider(provider: str, model: str, messages: list[dict]) -> tuple[dict, str]:
     config = PROVIDERS[provider]
@@ -82,7 +73,6 @@ async def _call_provider(provider: str, model: str, messages: list[dict]) -> tup
         except httpx.HTTPStatusError as e:
             raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
 
-
 async def _generate_title(provider: str, model: str, user_msg: str, assistant_msg: str, conversation_id: uuid.UUID, user_id: str) -> None:
     prompt = (
         "Summarize this conversation as a short title of 6 words or fewer. "
@@ -98,9 +88,8 @@ async def _generate_title(provider: str, model: str, user_msg: str, assistant_ms
     except Exception:
         pass
 
-
 @app.post("/chat/{provider}")
-async def chat(provider: str, request: ChatRequest, user: dict = Depends(verify_firebase_token)):
+async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_current_user)):
     if provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
@@ -137,9 +126,8 @@ async def chat(provider: str, request: ChatRequest, user: dict = Depends(verify_
 
     return {"conversation_id": str(conv_id), "response": data}
 
-
 @app.get("/conversations")
-async def list_conversations_endpoint(user: dict = Depends(verify_firebase_token)):
+async def list_conversations_endpoint(user: dict = Depends(get_current_user)):
     async with async_session() as session:
         rows = await store.list_conversations(session, user_id=user["uid"])
         return [
@@ -153,9 +141,8 @@ async def list_conversations_endpoint(user: dict = Depends(verify_firebase_token
             for c in rows
         ]
 
-
 @app.get("/conversations/{conversation_id}")
-async def get_conversation_endpoint(conversation_id: uuid.UUID, user: dict = Depends(verify_firebase_token)):
+async def get_conversation_endpoint(conversation_id: uuid.UUID, user: dict = Depends(get_current_user)):
     async with async_session() as session:
         conv = await store.get_conversation(session, conversation_id=conversation_id, user_id=user["uid"])
         if conv is None:
@@ -173,9 +160,8 @@ async def get_conversation_endpoint(conversation_id: uuid.UUID, user: dict = Dep
             ],
         }
 
-
 @app.patch("/conversations/{conversation_id}")
-async def rename_conversation_endpoint(conversation_id: uuid.UUID, body: TitleUpdate, user: dict = Depends(verify_firebase_token)):
+async def rename_conversation_endpoint(conversation_id: uuid.UUID, body: TitleUpdate, user: dict = Depends(get_current_user)):
     async with async_session() as session:
         conv = await store.update_title(session, conversation_id=conversation_id, user_id=user["uid"], title=body.title)
         if conv is None:
@@ -183,9 +169,8 @@ async def rename_conversation_endpoint(conversation_id: uuid.UUID, body: TitleUp
         await session.commit()
         return {"id": str(conv.id), "title": conv.title}
 
-
 @app.delete("/conversations/{conversation_id}")
-async def delete_conversation_endpoint(conversation_id: uuid.UUID, user: dict = Depends(verify_firebase_token)):
+async def delete_conversation_endpoint(conversation_id: uuid.UUID, user: dict = Depends(get_current_user)):
     async with async_session() as session:
         ok = await store.delete_conversation(session, conversation_id=conversation_id, user_id=user["uid"])
         if not ok:
