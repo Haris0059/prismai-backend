@@ -1,7 +1,6 @@
 import asyncio
 import uuid
 
-import httpx
 from fastapi import Depends, FastAPI, HTTPException, Header
 from pydantic import BaseModel
 
@@ -14,6 +13,9 @@ from app.core.auth import get_current_user
 import app.core.logging  # Setup structlog
 import app.store as store
 
+from app.providers.registry import PROVIDERS
+from app.providers.base import ProviderError
+
 app = FastAPI()
 
 class ChatRequest(BaseModel):
@@ -24,55 +26,6 @@ class ChatRequest(BaseModel):
 class TitleUpdate(BaseModel):
     title: str
 
-PROVIDERS = {
-    "anthropic": {
-        "url": "https://api.anthropic.com/v1/messages",
-        "key": settings.anthropic_api_key,
-        "headers": lambda key: {
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        "build_body": lambda model, messages: {
-            "model": model,
-            "max_tokens": 1024,
-            "messages": messages,
-        },
-        "extract_text": lambda data: data["content"][0]["text"],
-    },
-    "openai": {
-        "url": "https://api.openai.com/v1/chat/completions",
-        "key": settings.openai_api_key,
-        "headers": lambda key: {
-            "Authorization": f"Bearer {key}",
-            "content-type": "application/json",
-        },
-        "build_body": lambda model, messages: {
-            "model": model,
-            "messages": messages,
-        },
-        "extract_text": lambda data: data["choices"][0]["message"]["content"],
-    },
-}
-
-async def _call_provider(provider: str, model: str, messages: list[dict]) -> tuple[dict, str]:
-    config = PROVIDERS[provider]
-    key = config["key"]
-    if not key:
-        raise HTTPException(status_code=500, detail=f"API key not configured for {provider}")
-
-    headers = config["headers"](key)
-    body = config["build_body"](model, messages)
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            response = await client.post(config["url"], json=body, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            return data, config["extract_text"](data)
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-
 async def _generate_title(provider: str, model: str, user_msg: str, assistant_msg: str, conversation_id: uuid.UUID, user_id: str) -> None:
     prompt = (
         "Summarize this conversation as a short title of 6 words or fewer. "
@@ -80,7 +33,8 @@ async def _generate_title(provider: str, model: str, user_msg: str, assistant_ms
         f"User: {user_msg}\nAssistant: {assistant_msg}"
     )
     try:
-        _, title = await _call_provider(provider, model, [{"role": "user", "content": prompt}])
+        adapter = PROVIDERS[provider]
+        _, title = await adapter.complete(model, [{"role": "user", "content": prompt}])
         title = title.strip().strip('"').strip("'")[:80] or "New chat"
         async with async_session() as session:
             await store.update_title(session, conversation_id=conversation_id, user_id=user_id, title=title)
@@ -111,7 +65,11 @@ async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_cur
         await session.commit()
         conv_id = conv.id
 
-    data, assistant_text = await _call_provider(provider, request.model, history)
+    adapter = PROVIDERS[provider]
+    try:
+        data, assistant_text = await adapter.complete(request.model, history)
+    except ProviderError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
 
     async with async_session() as session:
         conv = await session.get(Conversation, conv_id)
