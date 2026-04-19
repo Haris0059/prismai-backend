@@ -1,4 +1,4 @@
-from typing import Protocol, AsyncGenerator
+from typing import Protocol, AsyncIterator
 import httpx
 
 class ProviderError(Exception):
@@ -19,7 +19,7 @@ class UpstreamError(ProviderError):
     def __init__(self, message: str = "Upstream error", status_code: int = 502):
         super().__init__(message, status_code=status_code)
 
-class TimeoutError(ProviderError):
+class ProviderTimeout(ProviderError):
     def __init__(self, message: str = "Timeout"):
         super().__init__(message, status_code=504)
 
@@ -30,7 +30,7 @@ def map_httpx_error(e: httpx.HTTPStatusError) -> ProviderError:
     elif 400 <= status < 500:
         return BadRequest(e.response.text)
     elif status == 504:
-        return TimeoutError(e.response.text)
+        return ProviderTimeout(e.response.text)
     else:
         return UpstreamError(e.response.text, status_code=status)
 
@@ -38,5 +38,5 @@ class LLMProvider(Protocol):
     async def complete(self, model: str, messages: list[dict]) -> tuple[dict, str]:
         ...
         
-    async def stream(self, model: str, messages: list[dict]) -> AsyncGenerator[str, None]:
+    def stream(self, model: str, messages: list[dict]) -> AsyncIterator[str]:
         ...

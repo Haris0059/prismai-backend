@@ -17,7 +17,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Security(securi
         ValueError, 
         firebase_admin.auth.InvalidIdTokenError, 
         firebase_admin.auth.ExpiredIdTokenError, 
-        firebase_admin.auth.RevokedIdTokenError
+        firebase_admin.auth.RevokedIdTokenError,
+        firebase_admin.auth.UserDisabledError,
+        firebase_admin.auth.CertificateFetchError
     ) as e:
         raise HTTPException(
             status_code=401,

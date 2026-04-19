@@ -3,7 +3,7 @@ import httpx
 import time
 import json
 import structlog
-from app.providers.base import TimeoutError, map_httpx_error
+from app.providers.base import ProviderTimeout, map_httpx_error
 
 logger = structlog.get_logger(__name__)
 
@@ -76,11 +76,10 @@ class GeminiAdapter:
         }
 
         start_time = time.time()
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=None)) as client:
             try:
                 async with client.stream("POST", url, json=body) as response:
                     response.raise_for_status()
-                    import json
                     async for line in response.aiter_lines():
                         if line.startswith("data: "):
                             try:
@@ -101,4 +100,4 @@ class GeminiAdapter:
             except httpx.TimeoutException:
                 latency_ms = int((time.time() - start_time) * 1000)
                 logger.error("provider_call", provider="gemini", model=model, latency_ms=latency_ms, status="timeout")
-                raise TimeoutError("Gemini API timeout")
+                raise ProviderTimeout("Gemini API timeout")

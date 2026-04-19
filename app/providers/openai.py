@@ -48,7 +48,7 @@ class OpenAIAdapter:
             except httpx.TimeoutException:
                 latency_ms = int((time.time() - start_time) * 1000)
                 logger.error("provider_call", provider="openai", model=model, latency_ms=latency_ms, status="timeout")
-                raise TimeoutError("OpenAI API timeout")
+                raise ProviderTimeout("OpenAI API timeout")
 
     async def stream(self, model: str, messages: list[dict]) -> AsyncGenerator[str, None]:
         headers = {
@@ -62,7 +62,7 @@ class OpenAIAdapter:
         }
 
         start_time = time.time()
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=None)) as client:
             try:
                 async with client.stream("POST", self.url, json=body, headers=headers) as response:
                     response.raise_for_status()
@@ -88,5 +88,4 @@ class OpenAIAdapter:
             except httpx.TimeoutException:
                 latency_ms = int((time.time() - start_time) * 1000)
                 logger.error("provider_call", provider="openai", model=model, latency_ms=latency_ms, status="timeout")
-                raise TimeoutError("OpenAI API timeout")
-   raise TimeoutError("OpenAI API timeout")
+                raise ProviderTimeout("OpenAI API timeout")
