@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func
+import structlog
 
 from app.db.models import Conversation
 from app.db.session import async_session
@@ -13,6 +14,8 @@ import app.store as store
 
 from app.providers.registry import PROVIDERS
 from app.providers.base import ProviderError
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -38,8 +41,8 @@ async def _generate_title(provider: str, model: str, user_msg: str, assistant_ms
         async with async_session() as session:
             await store.update_title(session, conversation_id=conversation_id, user_id=user_id, title=title)
             await session.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to generate title", conversation_id=str(conversation_id), error=str(e))
 
 @router.post("/chat/{provider}", response_model=ChatResponse)
 async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_current_user)) -> ChatResponse:
