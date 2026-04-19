@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     firebase_project_id: str | None = None
+    firebase_service_account_path: str | None = None
+    dev_auth_bypass: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
