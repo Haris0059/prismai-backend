@@ -55,3 +55,4 @@ def downgrade() -> None:
     op.drop_index('conversations_user_updated_idx', table_name='conversations')
     op.drop_table('conversations')
     # ### end Alembic commands ###
+    op.execute("DROP EXTENSION IF EXISTS pgcrypto")
