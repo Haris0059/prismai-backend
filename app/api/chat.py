@@ -1,30 +1,29 @@
 import asyncio
 import uuid
+from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-
 from sqlalchemy import func
 
 from app.db.models import Conversation
 from app.db.session import async_session
-from app.core.settings import settings
 from app.core.auth import get_current_user
-import app.core.logging  # Setup structlog
 import app.store as store
 
 from app.providers.registry import PROVIDERS
 from app.providers.base import ProviderError
 
-app = FastAPI()
+router = APIRouter()
 
 class ChatRequest(BaseModel):
     model: str
     message: str
     conversation_id: uuid.UUID | None = None
 
-class TitleUpdate(BaseModel):
-    title: str
+class ChatResponse(BaseModel):
+    conversation_id: str
+    response: dict[str, Any]
 
 async def _generate_title(provider: str, model: str, user_msg: str, assistant_msg: str, conversation_id: uuid.UUID, user_id: str) -> None:
     prompt = (
@@ -42,8 +41,8 @@ async def _generate_title(provider: str, model: str, user_msg: str, assistant_ms
     except Exception:
         pass
 
-@app.post("/chat/{provider}")
-async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_current_user)):
+@router.post("/chat/{provider}", response_model=ChatResponse)
+async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_current_user)) -> ChatResponse:
     if provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
@@ -82,56 +81,4 @@ async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_cur
             _generate_title(provider, request.model, request.message, assistant_text, conv_id, user_id)
         )
 
-    return {"conversation_id": str(conv_id), "response": data}
-
-@app.get("/conversations")
-async def list_conversations_endpoint(user: dict = Depends(get_current_user)):
-    async with async_session() as session:
-        rows = await store.list_conversations(session, user_id=user["uid"])
-        return [
-            {
-                "id": str(c.id),
-                "title": c.title,
-                "provider": c.provider,
-                "model": c.model,
-                "updated_at": c.updated_at.isoformat(),
-            }
-            for c in rows
-        ]
-
-@app.get("/conversations/{conversation_id}")
-async def get_conversation_endpoint(conversation_id: uuid.UUID, user: dict = Depends(get_current_user)):
-    async with async_session() as session:
-        conv = await store.get_conversation(session, conversation_id=conversation_id, user_id=user["uid"])
-        if conv is None:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        return {
-            "id": str(conv.id),
-            "title": conv.title,
-            "provider": conv.provider,
-            "model": conv.model,
-            "created_at": conv.created_at.isoformat(),
-            "updated_at": conv.updated_at.isoformat(),
-            "messages": [
-                {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
-                for m in conv.messages
-            ],
-        }
-
-@app.patch("/conversations/{conversation_id}")
-async def rename_conversation_endpoint(conversation_id: uuid.UUID, body: TitleUpdate, user: dict = Depends(get_current_user)):
-    async with async_session() as session:
-        conv = await store.update_title(session, conversation_id=conversation_id, user_id=user["uid"], title=body.title)
-        if conv is None:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        await session.commit()
-        return {"id": str(conv.id), "title": conv.title}
-
-@app.delete("/conversations/{conversation_id}")
-async def delete_conversation_endpoint(conversation_id: uuid.UUID, user: dict = Depends(get_current_user)):
-    async with async_session() as session:
-        ok = await store.delete_conversation(session, conversation_id=conversation_id, user_id=user["uid"])
-        if not ok:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        await session.commit()
-        return {"deleted": True}
+    return ChatResponse(conversation_id=str(conv_id), response=data)
