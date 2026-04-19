@@ -1,8 +1,8 @@
 import asyncio
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func
 import structlog
@@ -24,10 +24,6 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: uuid.UUID | None = None
 
-class ChatResponse(BaseModel):
-    conversation_id: str
-    response: dict[str, Any]
-
 async def _generate_title(provider: str, model: str, user_msg: str, assistant_msg: str, conversation_id: uuid.UUID, user_id: str) -> None:
     prompt = (
         "Summarize this conversation as a short title of 6 words or fewer. "
@@ -44,8 +40,8 @@ async def _generate_title(provider: str, model: str, user_msg: str, assistant_ms
     except Exception as e:
         logger.warning("Failed to generate title", conversation_id=str(conversation_id), error=str(e))
 
-@router.post("/chat/{provider}", response_model=ChatResponse)
-async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_current_user)) -> ChatResponse:
+@router.post("/chat/{provider}")
+async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_current_user)) -> StreamingResponse:
     if provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
@@ -68,20 +64,38 @@ async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_cur
         conv_id = conv.id
 
     adapter = PROVIDERS[provider]
-    try:
-        data, assistant_text = await adapter.complete(request.model, history)
-    except ProviderError as e:
-        raise HTTPException(status_code=e.status_code, detail=e.message)
 
-    async with async_session() as session:
-        conv = await session.get(Conversation, conv_id)
-        await store.append_message(session, conversation=conv, role="assistant", content=assistant_text)
-        conv.updated_at = func.now()
-        await session.commit()
+    async def generate() -> AsyncGenerator[str, None]:
+        chunks = []
+        try:
+            # Yield conversation ID first so the client has it
+            yield f"data: {json.dumps({'conversation_id': str(conv_id)})}\n\n"
 
-    if is_first_exchange:
-        asyncio.create_task(
-            _generate_title(provider, request.model, request.message, assistant_text, conv_id, user_id)
-        )
+            async for chunk in adapter.stream(request.model, history):
+                chunks.append(chunk)
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        except ProviderError as e:
+            yield f"data: {json.dumps({'error': e.message})}\n\n"
+            return
+        except Exception as e:
+            logger.error("stream_error", error=str(e), conversation_id=str(conv_id))
+            yield f"data: {json.dumps({'error': 'Internal server error'})}\n\n"
+            return
 
-    return ChatResponse(conversation_id=str(conv_id), response=data)
+        assistant_text = "".join(chunks)
+
+        # Persist full message upon completion
+        async with async_session() as session:
+            conv = await session.get(Conversation, conv_id)
+            await store.append_message(session, conversation=conv, role="assistant", content=assistant_text)
+            conv.updated_at = func.now()
+            await session.commit()
+
+        if is_first_exchange:
+            asyncio.create_task(
+                _generate_title(provider, request.model, request.message, assistant_text, conv_id, user_id)
+            )
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
