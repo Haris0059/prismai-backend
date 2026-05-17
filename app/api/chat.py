@@ -1,12 +1,12 @@
 import asyncio
 import uuid
 import json
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from sqlalchemy import func
+from pydantic import BaseModel, Field
 import structlog
 
 from app.db.models import Conversation
@@ -21,9 +21,12 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
+_background_tasks: set[asyncio.Task] = set()
+
+
 class ChatRequest(BaseModel):
     model: str
-    message: str
+    message: str = Field(min_length=1, max_length=32000)
     conversation_id: uuid.UUID | None = None
 
 async def _generate_title(provider: str, model: str, user_msg: str, assistant_msg: str, conversation_id: uuid.UUID, user_id: str) -> None:
@@ -86,17 +89,21 @@ async def chat(provider: str, request: ChatRequest, user: dict = Depends(get_cur
 
         assistant_text = "".join(chunks)
 
-        # Persist full message upon completion
         async with async_session() as session:
             conv = await session.get(Conversation, conv_id)
-            await store.append_message(session, conversation=conv, role="assistant", content=assistant_text)
-            conv.updated_at = func.now()
-            await session.commit()
+            if conv is None:
+                logger.warning("conversation_missing_on_persist", conversation_id=str(conv_id))
+            else:
+                await store.append_message(session, conversation=conv, role="assistant", content=assistant_text)
+                conv.updated_at = datetime.now(timezone.utc)
+                await session.commit()
 
-        if is_first_exchange:
-            asyncio.create_task(
+        if conv is not None and is_first_exchange:
+            task = asyncio.create_task(
                 _generate_title(provider, request.model, request.message, assistant_text, conv_id, user_id)
             )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
 
         yield "data: [DONE]\n\n"
 

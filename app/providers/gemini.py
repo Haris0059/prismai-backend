@@ -58,7 +58,7 @@ class GeminiAdapter:
             except httpx.TimeoutException:
                 latency_ms = int((time.time() - start_time) * 1000)
                 logger.error("provider_call", provider="gemini", model=model, latency_ms=latency_ms, status="timeout")
-                raise TimeoutError("Gemini API timeout")
+                raise ProviderTimeout("Gemini API timeout")
 
     async def stream(self, model: str, messages: list[dict]) -> AsyncGenerator[str, None]:
         url = f"{self.base_url}/{model}:streamGenerateContent?alt=sse&key={self.api_key}"

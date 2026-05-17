@@ -1,8 +1,9 @@
 from typing import AsyncGenerator
 import httpx
+import json
 import time
 import structlog
-from app.providers.base import TimeoutError, map_httpx_error
+from app.providers.base import ProviderTimeout, map_httpx_error
 
 logger = structlog.get_logger(__name__)
 

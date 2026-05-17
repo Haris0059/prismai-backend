@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.session import async_session
 from app.core.auth import get_current_user
@@ -10,7 +10,7 @@ import app.store as store
 router = APIRouter()
 
 class TitleUpdate(BaseModel):
-    title: str
+    title: str = Field(min_length=1, max_length=200)
 
 class ConversationListResponse(BaseModel):
     id: str
