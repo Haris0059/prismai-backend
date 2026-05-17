@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
         firebase_admin.initialize_app(cred)
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, root_path="/api/v1")
 
 app.add_middleware(RequestIDMiddleware)
 
