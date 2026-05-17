@@ -63,7 +63,7 @@ class OpenAIAdapter:
         }
 
         start_time = time.time()
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=None)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0)) as client:
             try:
                 async with client.stream("POST", self.url, json=body, headers=headers) as response:
                     response.raise_for_status()
