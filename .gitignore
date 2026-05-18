@@ -6,3 +6,5 @@ __pycache__/
 .gemini/
 *.md
 *.MD
+!README.md
+!API.md
